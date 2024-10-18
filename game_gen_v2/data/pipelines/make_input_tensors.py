@@ -11,7 +11,7 @@ DATA_DIR = "game_gen_v2/data/datasets"
 FPS = 15
 KEYBINDS = ["SPACE", "W", "A", "S", "D", "R", "E", "G", "F", "Q", "CONTROL", "SHIFT"]
 
-def clear_embeddings(data_dir):
+def clear_embeddings(data_dir=DATA_DIR):
     """
     Clear embeddings if we want to produce new ones
     """

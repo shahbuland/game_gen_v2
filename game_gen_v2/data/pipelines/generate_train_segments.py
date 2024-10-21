@@ -13,6 +13,9 @@ status.json -> Master file generated at start of dataset creation to determine w
 import os
 import torch
 import json
+from tqdm import tqdm
+import io
+import tarfile
 
 from game_gen_v2.data.controls.loading import load_inputs_tensor
 
@@ -21,7 +24,9 @@ OUT_DIR = "game_gen_v2/data/train_data"
 
 # Configuration for generated dataset
 N_ENTRIES = 100000
+ENTRIES_PER_FILE = 5000
 N_FRAMES_PER_SAMPLE = 150 # 10 seconds
+COMPRESS = True
 
 class FileIndex:
     """
@@ -68,6 +73,13 @@ class VideoData:
         self.n_frames = len(self.vt)
         self.chunk_size = N_FRAMES_PER_SAMPLE
 
+        self._iter = 0
+        self.buffer = [[], []]
+        self.first_name = None
+
+        self.tar_buffer = {}
+        self.tar_count = 0
+
     def skip(self, steps, stride):
         """
         Skip forward in both tensors (i.e. to resume somewhere)
@@ -78,6 +90,23 @@ class VideoData:
             return True
         return False
     
+    def exhausted(self):
+        return (self.ind + self.chunk_size) >= self.n_frames
+
+    def create_tarball(self, path, filename):
+        tar_filename = f"{filename}.tar.gz"
+        tar_path = os.path.join(path, tar_filename)
+
+        with tarfile.open(tar_path, "w:gz") as tar:
+            for name, data in self.tar_buffer.items():
+                info = tarfile.TarInfo(name=name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+
+        self.tar_buffer.clear()
+        self.first_name = None
+        self.tar_count += 1
+
     def save_next(self, path, filename, stride) -> bool:
         """
         Save the next chunk
@@ -88,18 +117,40 @@ class VideoData:
         :param stride: How much to move forward after saving this chunk
         """
 
-        vt_path = os.path.join(path, f"{filename}_vt.pt")
-        it_path = os.path.join(path, f"{filename}_it.pt")
+        if self.first_name is None:
+            self.first_name = filename
 
         vt_chunk = self.vt[self.ind:self.ind+self.chunk_size].contiguous()
         it_chunk = self.it[self.ind:self.ind+self.chunk_size].contiguous()
 
-        torch.save(vt_chunk.contiguous().clone(), vt_path)
-        torch.save(it_chunk.contiguous().clone(), it_path)
+        self.buffer[0].append(vt_chunk.contiguous().clone())
+        self.buffer[1].append(vt_chunk.contiguous().clone())
 
         self.ind += stride
+        self._iter += 1
 
-        if self.ind+self.chunk_size >= self.n_frames:
+        if (self._iter % ENTRIES_PER_FILE) == 0 or self.exhausted():
+            final_name = filename
+
+            vt_path = os.path.join(path, f"{self.first_name}_{final_name}_vt.pt")
+            it_path = os.path.join(path, f"{self.first_name}_{final_name}_it.pt")
+
+            vt_buffer = io.BytesIO()
+            it_buffer = io.BytesIO()
+
+            torch.save(torch.stack(self.buffer[0]), vt_buffer)
+            torch.save(torch.stack(self.buffer[1]), it_buffer)
+
+            self.tar_buffer[vt_path] = vt_buffer.getvalue()
+            self.tar_buffer[it_path] = it_buffer.getvalue()
+            self.create_tarball(path, f"{self.first_name}_{final_name}")
+
+            self.buffer = [[], []]
+
+            self.first_name = None
+
+
+        if self.exhausted():
             return True
         return False
 
@@ -181,20 +232,22 @@ if __name__ == "__main__":
     info = logger.prepare(index, stride)
     samples_so_far = info['samples_so_far']
 
-    for i in range(info['vid_idx'], n_files):
-        info = logger.get_info()
-        video = VideoData(*index[i])
-        exhausted = video.skip(info['frame_step'], stride)
+    with tqdm(total=N_ENTRIES, initial=samples_so_far, desc="Generating samples") as pbar:
+        for i in range(info['vid_idx'], n_files):
+            info = logger.get_info()
+            video = VideoData(*index[i])
+            exhausted = video.skip(info['frame_step'], stride)
 
-        while not exhausted:
-            filename = f"{samples_so_far:08d}"
-            exhausted = video.save_next(OUT_DIR, filename, stride)
+            while not exhausted:
+                filename = f"{samples_so_far:08d}"
+                exhausted = video.save_next(OUT_DIR, filename, stride)
 
-            logger.step()
-            samples_so_far += 1
-        
-        logger.step_video()
-        if samples_so_far >= N_ENTRIES:
-            break
+                logger.step()
+                samples_so_far += 1
+                pbar.update(1)
+            
+            logger.step_video()
+            if samples_so_far >= N_ENTRIES:
+                break
 
     logger.save()

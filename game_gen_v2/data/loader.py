@@ -9,10 +9,11 @@ class FrameDataset(IterableDataset):
     """
     Dataset of embedded frames + controls from gameplay
     """
-    def __init__(self, data_dir, image_size=256, frame_count=100):
+    def __init__(self, data_dir, image_size=256, frame_count=100, only_return_last_control = False):
         self.data_dir = Path(data_dir)
         self.image_size = image_size
         self.frame_count = frame_count
+        self.only_return_last_control = only_return_last_control
         
         # Find all unique data object IDs by looking at _vt.pt files
         vt_files = list(self.data_dir.glob("*_video.pt"))
@@ -20,7 +21,6 @@ class FrameDataset(IterableDataset):
         
         # Verify all required files exist
         for id in self.data_ids:
-            print(self.data_dir / f"{id}_video.pt")
             assert (self.data_dir / f"{id}_video.pt").exists(), f"Missing video file for {id}"
             assert (self.data_dir / f"{id}_controls.pt").exists(), f"Missing controls file for {id}"
             assert (self.data_dir / f"{id}_info.json").exists(), f"Missing meta file for {id}"
@@ -87,6 +87,22 @@ class FrameDataset(IterableDataset):
                 'end_idx': end_idx
             }
 
+    def normalize_controls(self, x):
+        # x is [n,controls+2] button inputs and mouse inputs as int16 float
+
+        # Mouse statistics from ~2 hours of gameplay with 30 FPS inputs
+        # Only mean/std for nonzero values
+        non_zero_mouse_x_std = 0.2310
+        non_zero_mouse_y_std = 0.0487
+
+        x = x.float()
+
+        x[:,:-2] = x[:,:-2].clamp(0,1) # Just cast to floats for on (1) or off (1)
+        x[:,-2:] = x[:,-2:]/255 # [-1,1] now
+        x[:,-2] = x[:,-2] / non_zero_mouse_x_std
+        x[:,-1] = x[:,-1] / non_zero_mouse_y_std
+        return x
+    
     def create_loader(self, batch_size, num_workers=4):
         def collate_fn(batch):
             """
@@ -121,7 +137,10 @@ class FrameDataset(IterableDataset):
                     res_ctrl.append(ctrl[slice_start:slice_end])
         
             res_vid = torch.stack(res_vid)
-            res_ctrl = torch.stack(res_ctrl)
+            res_ctrl = self.normalize_controls(torch.stack(res_ctrl))
+
+            if self.only_return_last_control:
+                res_ctrl = res_ctrl[:,-1]
 
             return res_vid, res_ctrl
 
@@ -134,11 +153,13 @@ class FrameDataset(IterableDataset):
 
 
 if __name__ == "__main__":
-    dataset = FrameDataset("./train_data")
+    from tinygrad.helpers import Timing
+    dataset = FrameDataset("datasets/train_data")
     dataloader = dataset.create_loader(batch_size=4, num_workers=0)
     
     # Get first batch
-    vt_batch, it_batch = next(iter(dataloader))
+    with Timing("Time to get a batch: "):
+        vt_batch, it_batch = next(iter(dataloader))
     
     print(f"Visual tokens batch shape: {vt_batch.shape}")
     print(f"Image tokens batch shape: {it_batch.shape}")

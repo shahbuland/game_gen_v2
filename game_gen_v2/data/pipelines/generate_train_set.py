@@ -15,10 +15,7 @@ import json
 from tqdm import tqdm
 
 from game_gen_v2.data.controls.loading import load_inputs_tensor
-
-IN_DIR = "game_gen_v2/data/datasets/BlackOpsColdWar"
-OUT_DIR = "game_gen_v2/data/train_data"
-SEGMENT_LENGTH = 5000
+from .data_config import SEGMENT_LENGTH, IN_DIR, OUT_DIR
 
 class FileIndex:
     """
@@ -140,7 +137,8 @@ if __name__ == "__main__":
             info_data = {
                 "src_vid_id": vid_idx,
                 "src_vid_pos": seg_idx,
-                "vid_len" : len(segment['video'])
+                "vid_len": len(segment['video']),
+                "src_folder": os.path.dirname(index[vid_idx][0])  # Add the source folder path
             }
             with open(os.path.join(OUT_DIR, f"{filename}_info.json"), 'w') as f:
                 json.dump(info_data, f, indent=4)

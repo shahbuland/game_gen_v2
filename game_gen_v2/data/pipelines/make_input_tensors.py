@@ -6,10 +6,10 @@ import os
 import torch
 
 from game_gen_v2.data.controls.loading import load_inputs_tensor
+from .data_config import FPS_OUT, KEYBINDS, IN_DIR
 
-DATA_DIR = "game_gen_v2/data/datasets"
-FPS = 15
-KEYBINDS = ["SPACE", "W", "A", "S", "D", "R", "E", "G", "F", "Q", "CONTROL", "SHIFT"]
+DATA_DIR = IN_DIR
+FPS = FPS_OUT
 
 def clear_embeddings(data_dir=DATA_DIR):
     """

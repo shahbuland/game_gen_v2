@@ -11,16 +11,13 @@ Folder
 import os
 from game_gen_v2.data.videos import TAStreamVideoReader
 from game_gen_v2.nn.vae import VAE
+from .data_config import FRAME_SKIP, VAE_BATCH_SIZE, OUT_H, OUT_W, IN_DIR
 
 import torch
 from tqdm import tqdm
 
 # Constants for this script
-VAE_BATCH_SIZE = 64
-OUT_H = 256
-OUT_W = 256
-FRAME_SKIP = 1
-DATA_DIR = "game_gen_v2/data/datasets"
+DATA_DIR = IN_DIR
 
 def clear_embeddings(data_dir):
     """

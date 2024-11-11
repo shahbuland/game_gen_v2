@@ -62,6 +62,7 @@ class FileWalkLoader:
         return (input_path, output_path)
 
 if __name__ == "__main__":
+    clear_embeddings()
     loader = FileWalkLoader(DATA_DIR)
 
     while True:

@@ -66,8 +66,8 @@ class VideoData:
             return None
             
         return {
-            'video': self.vt[start_idx:end_idx].contiguous(),
-            'controls': self.it[start_idx:end_idx].contiguous()
+            'video': self.vt[start_idx:end_idx].clone(),
+            'controls': self.it[start_idx:end_idx].clone()
         }
 
 class Logger:
@@ -136,16 +136,16 @@ if __name__ == "__main__":
             # Save segment metadata
             info_data = {
                 "src_vid_id": vid_idx,
-                "src_vid_pos": seg_idx,
+                "src_vid_pos": seg_idx * SEGMENT_LENGTH,
                 "vid_len": len(segment['video']),
-                "src_folder": os.path.dirname(index[vid_idx][0])  # Add the source folder path
+                "src_folder": os.path.dirname(index[vid_idx][0])
             }
             with open(os.path.join(OUT_DIR, f"{filename}_info.json"), 'w') as f:
                 json.dump(info_data, f, indent=4)
             
             segments_created += 1
             logger.step()
-            
+        
         logger.next_video()
         
     logger.save()

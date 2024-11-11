@@ -7,7 +7,7 @@ import wandb
 
 from ..configs import TrainConfig, ConfigClass
 from ..utils import Stopwatch
-from ..opts import get_scheduler_cls
+from ..opts import get_scheduler_cls, get_extra_optimizer
 
 class BaseTrainer:
     def __init__(self, config : TrainConfig, model_config : ConfigClass = None):
@@ -61,12 +61,12 @@ class BaseTrainer:
 
     def save(self, step = None, dir = None):
         """
-        In directory, save checkpoint of accelerator state using step and self.logging_config.run_name
+        In directory, save checkpoint of accelerator state using step and self.config.run_name
         """
         if step is None:
             step = self.total_step_counter
         if dir is None:
-            dir = os.path.join(self.config.checkpoint_root_dir, f"{self.logging_config.run_name}_{step}")
+            dir = os.path.join(self.config.checkpoint_root_dir, f"{self.config.run_name}_{step}")
         
         os.makedirs(dir, exist_ok = True)
 
@@ -82,7 +82,7 @@ class BaseTrainer:
         Load the latest checkpoint from the checkpoint directory.
         """
         checkpoint_dir = self.config.checkpoint_root_dir
-        run_name = self.logging_config.run_name
+        run_name = self.config.run_name
         
         # Get all directories that match the run name pattern
         matching_dirs = [d for d in os.listdir(checkpoint_dir) if d.startswith(run_name) and d[len(run_name):].strip('_').isdigit()]
@@ -113,8 +113,7 @@ class BaseTrainer:
         try:
             opt_class = getattr(torch.optim, self.config.opt)
         except:
-            pass # For when we add more optimizers (if we do)
-            #opt_class = get_extra_optimizer(self.config.opt)
+            opt_class = get_extra_optimizer(self.config.opt)
         
         opt = opt_class(model.parameters(), **self.config.opt_kwargs)
 

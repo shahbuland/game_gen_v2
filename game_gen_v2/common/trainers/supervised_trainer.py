@@ -51,4 +51,3 @@ class SimpleSupervisedTrainer(BaseTrainer):
                         sw.reset()
                     if should['save']:
                         self.save(self.total_step_counter)
-

@@ -1,6 +1,18 @@
 import torch
 from torch import nn
 
+def dict_accum(old_dict, new_dict):
+    for key, new_value in new_dict.items():
+        if key in old_dict:
+            old_value = old_dict[key]
+            if isinstance(new_value, type(old_value)):
+                old_dict[key] = old_value + new_value
+            else:
+                old_dict[key] = new_value
+        else:
+            old_dict[key] = new_value
+    return old_dict
+
 def count_parameters(model):
     """
     Count and print the number of learnable parameters in a model.

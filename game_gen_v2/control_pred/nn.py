@@ -18,9 +18,11 @@ class ControlPredBlock(nn.Module):
 
         self.norm_1 = LayerNorm(config.d_model)
         self.norm_2 = LayerNorm(config.d_model)
+        self.n_video_tokens = config.n_video_tokens
 
         self.attn = LinearAttn(config)
         self.ffn = MixFFN3D(config)
+        self.ffn_ctrl = MLP(config.d_model)
 
     def forward(self, x):
         # x is [b,n,d] and has two special tokens at start
@@ -31,7 +33,13 @@ class ControlPredBlock(nn.Module):
         
         resid_2 = x.clone()
         x = self.norm_2(x)
-        x[:,2:] = self.ffn(x[:,2:]) # Don't use MLP on the special tokens
+
+        x_video = x[:,:self.n_video_tokens]
+        x_ctrl = x[:,self.n_video_tokens:]
+
+        x_video = self.ffn(x_video)
+        x_ctrl = self.ffn_ctrl(x_ctrl)
+        x = torch.cat([x_video, x_ctrl], dim = 1)
         return x + resid_2
 
 class ControlPredCore(nn.Module):
@@ -41,8 +49,13 @@ class ControlPredCore(nn.Module):
         self.config = config
         self.layers = StackedLayers(ControlPredBlock, config)
 
-        self.button_token = nn.Parameter(torch.randn(config.d_model) * 0.02)
-        self.mouse_token = nn.Parameter(torch.randn(config.d_model) * 0.02)
+        self.n_video_tokens = config.n_video_tokens
+        self.n_frames = config.temporal_sample_size//config.temporal_patch_size
+        def randn_param(*shape):
+            return nn.Parameter(torch.randn(*shape) * 0.02)
+        
+        self.button_tokens = randn_param(self.n_frames, config.d_model)
+        self.mouse_tokens = randn_param(self.n_frames, config.d_model)
 
         self.patch_proj = nn.Conv3d(
             config.channels,
@@ -50,12 +63,6 @@ class ControlPredCore(nn.Module):
             (config.temporal_patch_size, config.patch_size, config.patch_size),
             (config.temporal_patch_size, config.patch_size, config.patch_size)
         )
-        self.patch_proj_img = nn.Conv2d(
-            config.channels,
-            config.d_model,
-            config.patch_size,
-            config.patch_size
-        ) # For image part
 
         self.fc_btn = nn.Linear(config.d_model, config.n_controls)
         self.fc_mouse = nn.Linear(config.d_model, config.n_mouse_axes)
@@ -63,6 +70,9 @@ class ControlPredCore(nn.Module):
         self.final_norm = LayerNorm(config.d_model)
 
     def forward(self, x):
+        """
+        Takes [b,t,c,h,w] video, and returns predicted controls [b,t,n_controls] for every frame
+        """
         b = x.shape[0]
         # x is [b,t,c,h,w] video
         #x_final = x[:,-1]
@@ -70,65 +80,63 @@ class ControlPredCore(nn.Module):
         x = self.patch_proj(x).flatten(2) # -> [b,d,n]
         x = x.transpose(1,2) # -> [b,n,d]
 
-        #x_final = self.patch_proj_img(x_final).flatten(2).transpose(1,2) # -> [b,m,d]
+        btn_tokens = eo.repeat(self.button_tokens, 'n d -> b n d', b = b)
+        m_tokens = eo.repeat(self.mouse_tokens, 'n d -> b n d', b = b)
+        x = torch.cat([x, btn_tokens, m_tokens], dim = 1) # -> [b,N,d]
 
-        btn_token = eo.repeat(self.button_token, 'd -> b n d', n = 1, b = b)
-        m_token = eo.repeat(self.mouse_token, 'd -> b n d', n = 1, b = b)
-
-        x = torch.cat([btn_token, m_token, x], dim = 1) # -> [b,n+1,d]
         x = self.layers(x)
-        x = x[:,:2] # [b,2,d]
+        x = x[:,self.n_video_tokens:] # [b,2*temporal_n_patches,d]
         x = self.final_norm(x)
-        btn_pred = self.fc_btn(x[:,0])
-        mouse_pred = self.fc_mouse(x[:,1])
+
+        x_btn = x[:,:self.n_frames]
+        x_mouse = x[:,self.n_frames:]
+
+        btn_pred = self.fc_btn(x_btn) # [b,t,n_btns]
+        mouse_pred = self.fc_mouse(x_mouse) # [b,t,2]
 
         return btn_pred, mouse_pred
-    
-# Custom weighted loss functions to help with
-# high prevalence of zeros in data
-class WeightedMSELoss(nn.Module):
-    def __init__(self, zero_weight):
+
+class ZeroPenaltyBtn(nn.Module):
+    "Penalize model for outputting zero when labels aren't zero"
+    def __init__(self):
         super().__init__()
 
-        self.zero_weight = zero_weight
-        self.non_zero_weight = 1 - zero_weight
-    
-    def forward(self, pred, target):
-        # target pred both [b,2]
-        sqr_err = (pred - target) ** 2
-
-        # Weight is zero_weight if both |x|+|y|=0
-        w = torch.where(
-            target.abs().sum(-1, keepdim = True) == 0,
-            torch.ones_like(target) * self.zero_weight,
-            torch.ones_like(target) * self.non_zero_weight
+    def forward(self, preds, labels):
+        mask = (labels.round() == 1) & (preds < 0) # Model pred 0, but really it was 1
+        zero_penalty = torch.where(
+            mask,
+            -preds, # preds should be maximized in these cases
+            0, # No loss otherwise
         )
+        return zero_penalty
 
-        return (sqr_err * w).mean()
-
-class WeightedBCELogitsLoss(nn.Module):
-    def __init__(self, btn_zero_weights):
+class ZeroPenaltyMouse(nn.Module):
+    def __init__(self):
         super().__init__()
 
-        self.btn_weights = torch.tensor(
-            [1 - prob for prob in btn_zero_weights]
+    def forward(self, preds, labels):
+        mask = (labels.abs().sum(-1,keepdim=True) > 0) & (preds.abs().sum(-1,keepdim=True) == 0)
+        zero_penalty = torch.where(
+            mask,
+            (1./(preds+1e-6)).clamp(0,1),
+            0
         )
-    
-    def forward(self, pred, target):
-        w_zero = self.btn_weights.to(device=pred.device,dtype=pred.dtype)
-        w = torch.where(
-            target==0,
-            w_zero,
-            1-w_zero
-        )
+        return zero_penalty.mean()
 
-        bce_loss = F.binary_cross_entropy_with_logits(
-            pred,
-            target,
-            reduction='none'
-        )
-        return (bce_loss * w).mean()
-        
+class MinMaxLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, preds, labels):
+        # preds is unnormalized scores [b,n,c]
+        # labels is 0s and 1s [b,n,c]
+        loss = torch.where(
+            labels.round() == 1,
+            -preds,
+            preds
+        ) # Maximize logits when 1, minimize otherwise
+
+        return loss
 
 class ControlPredModel(nn.Module):
     def __init__(self, config : ControlPredConfig):
@@ -138,43 +146,57 @@ class ControlPredModel(nn.Module):
         self.core = ControlPredCore(config)
         self.n_controls = config.n_controls
 
-        #self.btn_loss = WeightedBCELogitsLoss(config.button_zero_weights)
-        #self.mouse_loss = WeightedMSELoss(config.mouse_zero_weights)
-
         self.btn_loss = nn.BCEWithLogitsLoss()
         self.mouse_loss = nn.MSELoss()
-        
+
+        self.zp_btn = ZeroPenaltyBtn()
+        self.zp_mouse = ZeroPenaltyMouse()
+
     def forward(self, x, labels):
         # x is [b,t,c,h,w] video
-        # labels is [n_controls] where
-        # labels[:n_controls] is key presses
-        # labels[n_controls:] is mouse axes
-        button_preds, mouse_preds = self.core(x) # -> [b,n_controls+2]
+        # labels is [b,t,n_controls] where
+        # labels[:,:,:n_controls] is key presses
+        # labels[:,:,n_controls:] is mouse axes
+        button_preds, mouse_preds = self.core(x) # -> [b,t,n_controls+2]
 
-        button_labels = labels[:,:self.n_controls]
-        mouse_targets = labels[:,self.n_controls:] 
+        button_labels = labels[:,:,:self.n_controls]
+        mouse_targets = labels[:,:,self.n_controls:] 
 
-        button_loss = self.btn_loss(button_preds, button_labels)
-        mouse_loss = self.mouse_loss(mouse_preds, mouse_targets)
+        #print("==========")
+        #print(button_labels[:10,-1])
+        #print(button_preds[:10,-1])
+        #print("----")
+        #print(mouse_targets[:10,-1])
+        #print(mouse_preds[:10,-1])
+        #print("==========")
 
-        loss = self.config.btn_weight * button_loss + self.config.mouse_weight * mouse_loss
+        btn_loss = self.btn_loss(button_preds, button_labels)
+        m_loss = self.mouse_loss(mouse_preds, mouse_targets)
+
+        loss = self.config.btn_weight * btn_loss + self.config.mouse_weight * m_loss
 
         # Calculate button prediction accuracy
         with torch.no_grad():
-            button_preds_binary = (torch.sigmoid(button_preds) > 0.5).float()
-            button_accuracy = (button_preds_binary == button_labels).float().mean()
+            # Calculate accuracy for the last frame
+            button_preds_binary_last = (torch.sigmoid(button_preds[:, -1]) > 0.5).float()
+            button_labels_last = button_labels[:, -1]
+            button_accuracy = (button_preds_binary_last == button_labels_last).float().mean()
 
-            nonzero_btn_idx = button_labels != 0
-            
-            nonzero_button_acc = (button_preds_binary[nonzero_btn_idx] == button_labels[nonzero_btn_idx]).float().mean()
+            # Calculate non-zero button accuracy for the last frame
+            nonzero_btn_idx_last = button_labels_last != 0
+            nonzero_button_acc = (button_preds_binary_last[nonzero_btn_idx_last] == button_labels_last[nonzero_btn_idx_last]).float().mean()
+
+            all_zero_buttons = (button_labels.sum(dim=-1) == 0).float().mean()
+            all_zero_mouse = (mouse_targets.abs().sum(dim=-1) == 0).float().mean()
 
         extra = {
-            'button_pred_loss' : button_loss.item(),
-            'mouse_pred_loss' : mouse_loss.item(),
-            'button_accuracy' : button_accuracy.item(),
-            'nonzero_button_acc' : nonzero_button_acc.item()
+            'button_pred_loss': btn_loss.item(),
+            'mouse_pred_loss': m_loss.item(),
+            'button_accuracy': button_accuracy.item(),
+            'button_sensitivity': nonzero_button_acc.item(),
+            'prop_all_zero_buttons': all_zero_buttons.item(),
+            'prop_all_zero_mouse': all_zero_mouse.item()
         }
-        
         return loss, extra
 
 if __name__ == "__main__":

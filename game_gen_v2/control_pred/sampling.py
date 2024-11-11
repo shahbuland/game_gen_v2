@@ -11,16 +11,21 @@ from pathlib import Path
 from tqdm import tqdm
 import wandb
 
-FPS = 30
-KEYBINDS = ["SPACE", "W", "A", "S", "D", "R", "E", "G", "F", "Q", "CONTROL", "SHIFT"]
+from game_gen_v2.data.pipelines.data_config import FPS_OUT, KEYBINDS
 
-def write_np_array_to_video(frames, fps=FPS, controls=None):
+FPS = FPS_OUT
+
+def write_np_array_to_video(frames, fps=FPS, controls=None, output_fmt = "wandb"):
     """
     Convert a numpy array of frames to a wandb.Video object.
 
     :param frames: numpy array of shape [n_frames, height, width, channels]
     :param fps: int, frames per second for the output video
     :param controls: numpy array of control inputs
+    :param output_fmt: Returns:
+        - "wandb" : WANDB video [RGB, NCHW]
+        - "cv" : CV video [BGR, NHWC]
+        - "np" : np video [RGB, NHWC]
     :return: wandb.Video object
     """
     if not isinstance(frames, np.ndarray):
@@ -39,17 +44,24 @@ def write_np_array_to_video(frames, fps=FPS, controls=None):
         if controls is not None:
             frame = draw_controls(frame, controls[i])
 
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if output_fmt != "cv":
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
         processed_frames.append(frame)
         
     # Convert the list of frames to a numpy array
-    video_array = np.stack(processed_frames) # [n,h,w,c] [0,255] uint8
-    video_array = eo.rearrange(video_array, 'n h w c -> n c h w')
-    
-    # Create a wandb.Video object
-    video = wandb.Video(video_array, fps=fps, format="mp4")
-    
+    video_array = np.stack(processed_frames)  # [n,h,w,c] [0,255] uint8
+
+    if output_fmt == "wandb":
+        video_array = eo.rearrange(video_array, 'n h w c -> n c h w')
+        video = wandb.Video(video_array, fps=fps, format="mp4")
+    elif output_fmt == "cv":
+        video = video_array  # CV2 format is already [n,h,w,c] in BGR
+    elif output_fmt == "np":
+        video = video_array  # Already in [n,h,w,c] RGB format
+    else:
+        raise ValueError(f"Invalid output format: {output_fmt}")
+
     return video
 
 def draw_controls(frame, control_vector):
@@ -159,13 +171,12 @@ class ControlPredSampler:
         for i in tqdm(range(t, samples.shape[1]+1)):
             model_in = samples[:,i-t:i] # [b,t,c,h,w]
             model_in = model_in.to(device=model_device,dtype=model_dtype)
-            assert model_in.shape[1] == 8
             model_out_btn, model_out_mouse = model(model_in) # [b,n_controls]
+            model_out_btn = model_out_btn[:,-1]
+            model_out_mouse = model_out_mouse[:,-1]
 
             # Denormalize the inputs back to something useful
-            model_out_btn = model_out_btn.sigmoid().round()
-            model_out_mouse[:,0] *= 0.231
-            model_out_mouse[:,1] *= 0.0487
+            model_out_btn = (torch.sigmoid(model_out_btn) > 0.5).float()
             model_out = torch.cat([model_out_btn, model_out_mouse], -1)
             
             return_controls.append(model_out)

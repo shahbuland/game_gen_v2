@@ -10,6 +10,7 @@ class ControlPredConfig(TransformerConfig):
     # weight of losses for CE (button prediction) and mouse regression
     btn_weight : float = 1.0
     mouse_weight : float = 1.0
+    prev_weight : float = 0.5 # Weight for predicting controls on previous frames
 
     button_zero_weights: List[float] = field(default_factory=lambda: [
         0.9960,

@@ -75,7 +75,6 @@ class ControlPredCore(nn.Module):
         """
         b = x.shape[0]
         # x is [b,t,c,h,w] video
-        #x_final = x[:,-1]
         x = x.transpose(1,2) # -> [b,c,t,h,w]
         x = self.patch_proj(x).flatten(2) # -> [b,d,n]
         x = x.transpose(1,2) # -> [b,n,d]
@@ -96,48 +95,6 @@ class ControlPredCore(nn.Module):
 
         return btn_pred, mouse_pred
 
-class ZeroPenaltyBtn(nn.Module):
-    "Penalize model for outputting zero when labels aren't zero"
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, preds, labels):
-        mask = (labels.round() == 1) & (preds < 0) # Model pred 0, but really it was 1
-        zero_penalty = torch.where(
-            mask,
-            -preds, # preds should be maximized in these cases
-            0, # No loss otherwise
-        )
-        return zero_penalty
-
-class ZeroPenaltyMouse(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, preds, labels):
-        mask = (labels.abs().sum(-1,keepdim=True) > 0) & (preds.abs().sum(-1,keepdim=True) == 0)
-        zero_penalty = torch.where(
-            mask,
-            (1./(preds+1e-6)).clamp(0,1),
-            0
-        )
-        return zero_penalty.mean()
-
-class MinMaxLoss(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, preds, labels):
-        # preds is unnormalized scores [b,n,c]
-        # labels is 0s and 1s [b,n,c]
-        loss = torch.where(
-            labels.round() == 1,
-            -preds,
-            preds
-        ) # Maximize logits when 1, minimize otherwise
-
-        return loss
-
 class ControlPredModel(nn.Module):
     def __init__(self, config : ControlPredConfig):
         super().__init__()
@@ -149,9 +106,6 @@ class ControlPredModel(nn.Module):
         self.btn_loss = nn.BCEWithLogitsLoss()
         self.mouse_loss = nn.MSELoss()
 
-        self.zp_btn = ZeroPenaltyBtn()
-        self.zp_mouse = ZeroPenaltyMouse()
-
     def forward(self, x, labels):
         # x is [b,t,c,h,w] video
         # labels is [b,t,n_controls] where
@@ -161,14 +115,6 @@ class ControlPredModel(nn.Module):
 
         button_labels = labels[:,:,:self.n_controls]
         mouse_targets = labels[:,:,self.n_controls:] 
-
-        #print("==========")
-        #print(button_labels[:10,-1])
-        #print(button_preds[:10,-1])
-        #print("----")
-        #print(mouse_targets[:10,-1])
-        #print(mouse_preds[:10,-1])
-        #print("==========")
 
         btn_loss = self.btn_loss(button_preds, button_labels)
         m_loss = self.mouse_loss(mouse_preds, mouse_targets)

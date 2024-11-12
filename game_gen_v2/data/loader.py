@@ -6,32 +6,34 @@ import random
 from pathlib import Path
 
 class FrameDataset(IterableDataset):
-    """
-    Dataset of embedded frames + controls from gameplay
-    """
-    def __init__(self, data_dir, image_size=256, frame_count=100, diversity = True):
-        """
-        :param diversity: Use diversity inds to get most diverse samples from a chunk
-        """
+    def __init__(self, data_dir, frame_count=100, diversity = True, top_p : float = 0.5, image_transform = None):
         self.data_dir = Path(data_dir)
-        self.image_size = image_size
         self.frame_count = frame_count
         self.diversity = diversity
+        self.top_p = top_p
+        self.image_transform = image_transform
         
-        # Find all unique data object IDs by looking at _vt.pt files
-        vt_files = list(self.data_dir.glob("*_video.pt"))
-        self.data_ids = [f.stem.replace('_video','') for f in vt_files]
+        # Find all subdirectories
+        self.subdirs = [d for d in self.data_dir.iterdir() if d.is_dir()]
+        
+        # Find all unique data object IDs by looking at _video.pt files across all subdirectories
+        self.data_ids = []
+        for subdir in self.subdirs:
+            vt_files = list(subdir.glob("*_video.pt"))
+            self.data_ids.extend([f.stem.replace('_video','') for f in vt_files])
         
         # Verify all required files exist
         for id in self.data_ids:
-            assert (self.data_dir / f"{id}_video.pt").exists(), f"Missing video file for {id}"
-            assert (self.data_dir / f"{id}_controls.pt").exists(), f"Missing controls file for {id}"
-            assert (self.data_dir / f"{id}_info.json").exists(), f"Missing meta file for {id}"
+            subdir = self.get_subdir_for_id(id)
+            assert (subdir / f"{id}_video.pt").exists(), f"Missing video file for {id}"
+            assert (subdir / f"{id}_controls.pt").exists(), f"Missing controls file for {id}"
+            assert (subdir / f"{id}_info.json").exists(), f"Missing meta file for {id}"
 
         # Load metadata and sort data_ids by src_vid_id and src_vid_pos
         id_to_meta = {}
         for id in self.data_ids:
-            meta_path = self.data_dir / f"{id}_info.json"
+            subdir = self.get_subdir_for_id(id)
+            meta_path = subdir / f"{id}_info.json"
             with open(meta_path) as f:
                 meta = json.load(f)
                 id_to_meta[id] = meta
@@ -45,7 +47,8 @@ class FrameDataset(IterableDataset):
         # Load video lengths from meta files
         self.vid_lens = {}
         for id in self.data_ids:
-            meta_path = self.data_dir / f"{id}_info.json"
+            subdir = self.get_subdir_for_id(id)
+            meta_path = subdir / f"{id}_info.json"
             with open(meta_path) as f:
                 meta = json.load(f)
                 self.vid_lens[id] = meta["vid_len"]
@@ -61,35 +64,29 @@ class FrameDataset(IterableDataset):
         for id in self.vid_lens:
             self.total_samples += (self.vid_lens[id] - self.frame_count + 1)
 
+    def get_subdir_for_id(self, id):
+        """Helper method to get the subdirectory for a given id"""
+        subdir_num = int(id) // 1000
+        return self.data_dir / f"{subdir_num:03d}"
+
     def __iter__(self):
-        """
-        Yields file paths, start and end idx
-        """
         while True:
-            # Get random data object ID
             data_id = random.choice(self.data_ids)
-            
-            # Get sequence length from meta
             seq_len = self.vid_lens[data_id]
             
             if seq_len < self.frame_count:
                 continue
                 
-            # Calculate slice indices
-            div_idx = self.sample_weighted(seq_len//4)
-            #start_idx = random.randint(0, seq_len - self.frame_count)
-            #end_idx = start_idx + self.frame_count
+            div_idx = self.sample_weighted(int(seq_len * self.top_p))
             
-            # Return paths and indices
-            vt_path = self.data_dir / f"{data_id}_video.pt"
-            it_path = self.data_dir / f"{data_id}_controls.pt"
+            subdir = self.get_subdir_for_id(data_id)
+            vt_path = subdir / f"{data_id}_video.pt"
+            it_path = subdir / f"{data_id}_controls.pt"
             
             yield {
                 'vt_path': vt_path,
                 'it_path': it_path,
                 'div_idx' : div_idx
-                #'start_idx': start_idx,
-                #'end_idx': end_idx
             }
 
     def normalize_controls(self, x):
@@ -146,11 +143,11 @@ class FrameDataset(IterableDataset):
                     file_map[path].append(i)
                 else:
                     file_map[path] = [i]
-            
+
             for path in file_map:
                 vid = torch.load(path, weights_only = False)
                 ctrl = torch.load(str(path).replace("_video.pt", "_controls.pt"), weights_only = False)
-                div = torch.load((str(path).replace("_video.pt", "_diversity_inds.pt")), weights_only = False)
+                div = torch.load(str(path).replace("_video.pt", "_diversity_inds.pt"), weights_only = False)
 
                 vid_len = len(vid)
 
@@ -170,6 +167,10 @@ class FrameDataset(IterableDataset):
                     res_ctrl.append(ctrl[slice_start:slice_end])
         
             res_vid = torch.stack(res_vid)
+
+            if self.image_transform is not None:
+                res_vid = self.image_transform(res_vid)
+
             res_ctrl = torch.stack(res_ctrl)
             res_ctrl = self.normalize_controls(res_ctrl)
 

@@ -112,20 +112,27 @@ class ControlPredSampler:
             fps=30, out_res=256,
             input_directory="datasets/train_data",
             sample_cache = "sampler_cache.pt",
-            n_samples=8, sample_length=300
+            n_samples=8, sample_length=300,
+            image_transform=None
         ):
-        self.vae = VAE()
         self.fps = fps
         self.out_res = out_res
         self.input_directory = input_directory
         self.n_samples = n_samples
         self.sample_length = sample_length
+        self.image_transform = image_transform
 
         if os.path.exists(sample_cache):
             self.input_samples = torch.load(sample_cache).cuda()
         else:
             self.input_samples = self._get_input_samples().cuda()
             torch.save(self.input_samples, sample_cache)
+
+        if self.input_samples.shape[-3] == 3:
+            self.vae = None
+        else:
+            self.vae = VAE()
+            
 
     def _get_input_samples(self):
         video_files = sorted(Path(self.input_directory).glob("*_video.pt"))
@@ -147,8 +154,11 @@ class ControlPredSampler:
                 sample = video_tensor[start_idx:start_idx + self.sample_length]
                 input_samples.append(sample)
         
-        return torch.stack(input_samples)
-
+        res = torch.stack(input_samples)
+        if self.image_transform is None:
+            return res
+        return self.image_transform(res)
+    
     @torch.no_grad()
     def predict_on_samples(self, model, model_cfg):
         """
@@ -196,11 +206,12 @@ class ControlPredSampler:
 
         samples, controls = self.predict_on_samples(model, config)
         
-        samples = torch.stack([self.vae.decode(sample) for sample in samples])
+        if self.vae is not None:
+            samples = torch.stack([self.vae.decode(sample) for sample in samples])
 
         res = []
         for i, (sample, control) in enumerate(zip(samples, controls)):
-            res.append(write_np_array_to_video(torch_to_np(sample), controls=control))
+            res.append(write_np_array_to_video(torch_to_np(sample), controls=control, fps=self.fps))
 
         return res
 

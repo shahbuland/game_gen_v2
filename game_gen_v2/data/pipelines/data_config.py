@@ -16,3 +16,4 @@ KEYBINDS = ["SPACE", "W", "A", "S", "D", "R", "E", "G", "F", "Q", "LCTRL", "LSHI
 # Directories
 IN_DIR = "D:/datasets/BlackOpsColdWar" # where all the .mp4 + .csv data is
 OUT_DIR = "E:/datasets/train_data" # where to save segments
+FILES_PER_SUBFOLDER = 500

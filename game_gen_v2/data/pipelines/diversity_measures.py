@@ -1,7 +1,8 @@
-from .data_config import SEGMENT_LENGTH, IN_DIR, OUT_DIR
+from .data_config import SEGMENT_LENGTH, IN_DIR, OUT_DIR, FILES_PER_SUBFOLDER
 
 import os
 import torch
+from pathlib import Path
 
 def calculate_diversity_indices(controls_tensor):
     # controls is [n,d]
@@ -13,21 +14,25 @@ def calculate_diversity_indices(controls_tensor):
     return sorted_indices
 
 def process_control_files(out_dir=OUT_DIR):
-    for filename in os.listdir(out_dir):
-        if filename.endswith("_controls.pt"):
-            # Extract the numeric part of the filename
-            file_number = filename[:8]
-            
-            # Load the controls tensor
-            controls_path = os.path.join(out_dir, filename)
-            controls_tensor = torch.load(controls_path)
-            
-            # Calculate diversity indices
-            diversity_indices = calculate_diversity_indices(controls_tensor)
-            
-            # Save the diversity indices
-            diversity_path = os.path.join(out_dir, f"{file_number}_diversity_inds.pt")
-            torch.save(diversity_indices, diversity_path)
+    out_dir = Path(out_dir)
+    
+    # Iterate through all subdirectories
+    for subdir in out_dir.iterdir():
+        if subdir.is_dir():
+            for filename in subdir.iterdir():
+                if filename.name.endswith("_controls.pt"):
+                    # Extract the numeric part of the filename
+                    file_number = filename.stem[:8]
+                    
+                    # Load the controls tensor
+                    controls_tensor = torch.load(filename)
+                    
+                    # Calculate diversity indices
+                    diversity_indices = calculate_diversity_indices(controls_tensor)
+                    
+                    # Save the diversity indices in the same subdirectory
+                    diversity_path = subdir / f"{file_number}_diversity_inds.pt"
+                    torch.save(diversity_indices, diversity_path)
 
 if __name__ == "__main__":
     process_control_files()

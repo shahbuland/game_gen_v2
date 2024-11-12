@@ -16,7 +16,7 @@ from tqdm import tqdm
 import shutil
 
 from game_gen_v2.data.controls.loading import load_inputs_tensor
-from .data_config import SEGMENT_LENGTH, IN_DIR, OUT_DIR, LATENT, ASSUMED_SHAPE
+from .data_config import SEGMENT_LENGTH, IN_DIR, OUT_DIR, LATENT, ASSUMED_SHAPE, FILES_PER_SUBFOLDER
 
 def clear_dataset(data_dir=OUT_DIR):
     """
@@ -130,13 +130,12 @@ class Logger:
         self.info['seg_idx'] = 0
         self.save()
 
-def generate_train_set(in_dir, out_dir, latent, segment_length, assumed_shape):
+def generate_train_set(in_dir, out_dir, latent, segment_length, assumed_shape, per_subdir=1000):
     os.makedirs(out_dir, exist_ok=True)
     index = FileIndex(in_dir, assumed_shape)
     logger = Logger(dir=out_dir, segment_length=segment_length)
 
     info = logger.prepare(index)
-    suffix = "_video.pt" if latent else "_raw_video.pt"
     
     segments_created = info['segments_created']
     
@@ -149,19 +148,24 @@ def generate_train_set(in_dir, out_dir, latent, segment_length, assumed_shape):
             if segment is None:
                 continue
                 
-            # Save segment files
+            # Create subdirectory based on segments_created
+            subdir = f"{segments_created // per_subdir:03d}"
+            subdir_path = os.path.join(out_dir, subdir)
+            os.makedirs(subdir_path, exist_ok=True)
+
+            # Save segment files in the subdirectory
             filename = f"{segments_created:08d}"
-            torch.save(segment['video'], os.path.join(out_dir, f"{filename}_{suffix}"))
-            torch.save(segment['controls'], os.path.join(out_dir, f"{filename}_controls.pt"))
+            torch.save(segment['video'], os.path.join(subdir_path, f"{filename}_video.pt"))
+            torch.save(segment['controls'], os.path.join(subdir_path, f"{filename}_controls.pt"))
             
-            # Save segment metadata
+            # Save segment metadata in the subdirectory
             info_data = {
                 "src_vid_id": vid_idx,
                 "src_vid_pos": seg_idx * segment_length,
                 "vid_len": len(segment['video']),
                 "src_folder": os.path.dirname(index[vid_idx][0])
             }
-            with open(os.path.join(out_dir, f"{filename}_info.json"), 'w') as f:
+            with open(os.path.join(subdir_path, f"{filename}_info.json"), 'w') as f:
                 json.dump(info_data, f, indent=4)
             
             segments_created += 1
@@ -172,4 +176,4 @@ def generate_train_set(in_dir, out_dir, latent, segment_length, assumed_shape):
     logger.save()
 
 if __name__ == "__main__":
-    generate_train_set(IN_DIR, OUT_DIR, LATENT, SEGMENT_LENGTH, ASSUMED_SHAPE)
+    generate_train_set(IN_DIR, OUT_DIR, LATENT, SEGMENT_LENGTH, ASSUMED_SHAPE, FILES_PER_SUBFOLDER)

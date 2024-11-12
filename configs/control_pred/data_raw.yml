@@ -1,0 +1,5 @@
+sample_size: 256
+channels: 3
+top_p: 0.5
+fps: 15
+data_path: "E:/datasets/train_data_raw"

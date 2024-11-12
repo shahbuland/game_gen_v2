@@ -1,0 +1,19 @@
+# Transformer configuration for video processing
+n_layers: 12
+n_heads: 6
+d_model: 384
+attn_impl: "linear"
+cross: false
+
+# Input image configuration
+channels: 3
+sample_size: 224
+patch_size: 28
+
+# Video configuration
+temporal_sample_size: 8
+temporal_patch_size: 1
+
+# control stuff
+n_controls: 14
+n_mouse_axes: 2

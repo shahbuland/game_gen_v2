@@ -12,10 +12,10 @@ from .sampling import ControlPredSampler, write_np_array_to_video, draw_controls
 from game_gen_v2.common.nn.vae import VAE
 from game_gen_v2.data.videos import TAStreamVideoReader
 
-cp_path = "checkpoints/control_pred/WASD_tiny_10k/model.safetensors"
+cp_path = "checkpoints/control_pred/many_tiny_16k/model.safetensors"
 
 # Load the model configuration
-model_cfg = ControlPredConfig.from_yaml("configs/control_pred/tiny_wasd.yml")
+model_cfg = ControlPredConfig.from_yaml("configs/control_pred/tiny_many.yml")
 
 # Initialize the model
 model = ControlPredModel(model_cfg)
@@ -31,10 +31,9 @@ vae.cuda()
 vae.half()
 
 @torch.no_grad()
-def predict_on_samples(samples):
+def predict_on_samples(samples, ema_alpha_btn=0.0, ema_alpha_mouse=0.0):
     """
-    Get model predictions over the input samples
-    Batch has each input video, we iterate over slices of the video
+    Get model predictions over the input samples with EMA smoothing
     """
     t = model_cfg.temporal_sample_size
     n_controls = model_cfg.n_controls
@@ -43,9 +42,6 @@ def predict_on_samples(samples):
     model_dtype = next(model.parameters()).dtype
     model_device = next(model.parameters()).device
 
-    # samples =   [b,n,c,h,w] n >> t 
-    # Model takes [b,t,c,h,w] as its input, let's do a sliding window
-
     samples = samples.unsqueeze(0)
 
     # Start in middle
@@ -53,20 +49,37 @@ def predict_on_samples(samples):
     return_samples = samples[:,middle_idx:] # Skip first t-1, since we can't make prediction for them anyways
     return_controls = []
 
+    # Initialize EMA states
+    ema_btn_logits = None
+    ema_mouse_controls = None
+
     for i in tqdm(range(t, samples.shape[1]+1)):
-        model_in = samples[:,i-t:i] # [b,t,c,h,w]
-        model_in = model_in.to(device=model_device,dtype=model_dtype)
-        model_out_btn, model_out_mouse = model(model_in) # [b,n_controls]
+        model_in = samples[:,i-t:i].to(device=model_device, dtype=model_dtype)
+        model_out_btn, model_out_mouse = model(model_in)
         model_out_btn = model_out_btn[:,middle_idx]
         model_out_mouse = model_out_mouse[:,middle_idx]
 
-        # Denormalize the inputs back to something useful
-        model_out_btn = (torch.sigmoid(model_out_btn) > 0.5).float()
-        model_out = torch.cat([model_out_btn, model_out_mouse], -1)
+        # Apply EMA smoothing to button logits
+        if ema_btn_logits is None:
+            ema_btn_logits = model_out_btn
+        else:
+            ema_btn_logits = ema_alpha_btn * ema_btn_logits + (1 - ema_alpha_btn) * model_out_btn
+
+        # Apply EMA smoothing to mouse controls
+        if ema_mouse_controls is None:
+            ema_mouse_controls = model_out_mouse
+        else:
+            ema_mouse_controls = ema_alpha_mouse * ema_mouse_controls + (1 - ema_alpha_mouse) * model_out_mouse
+
+        # Use smoothed logits for button predictions
+        smoothed_btn = (torch.sigmoid(ema_btn_logits) > 0.9).float()
+        
+        # Combine smoothed button and mouse controls
+        model_out = torch.cat([smoothed_btn, 2*ema_mouse_controls], -1)
         
         return_controls.append(model_out)
     
-    return_controls = torch.stack(return_controls, dim = 1) # [b,n_frames,n_controls]
+    return_controls = torch.stack(return_controls, dim=1) # [b,n_frames,n_controls]
 
     return_samples = return_samples[:,:return_controls.shape[1]]
 
@@ -96,9 +109,6 @@ def label_video(video_path):
         torch.save(samples, latent_path)
         print(f"Saved latents to {latent_path}")
 
-    # Make video twice as fast
-    samples = samples[::2]
-
     samples, controls = predict_on_samples(samples)
     x = torch_to_np(vae.decode(samples[0]))
     
@@ -114,6 +124,6 @@ def label_video(video_path):
 
 
 
-label_video("experiments/apartment.mp4")
+label_video("experiments/control_pred_irl/erratic.mp4")
 print("Done")
 

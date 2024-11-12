@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List
-from game_gen_v2.common.configs import TransformerConfig
+from game_gen_v2.common.configs import TransformerConfig, ConfigClass
 
 @dataclass
 class ControlPredConfig(TransformerConfig):
@@ -29,3 +29,12 @@ class ControlPredConfig(TransformerConfig):
         0.8526
     ])
     mouse_zero_weights : float = 0.3183
+
+@dataclass
+class ControlPredDataConfig(ConfigClass):
+    data_path: str = ""
+    sample_size : int = 256
+    temporal_sample_size :int = 8
+    channels : int = 3
+    top_p : float = 0.5
+    fps: int = 15

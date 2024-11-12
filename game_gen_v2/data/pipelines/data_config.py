@@ -1,5 +1,7 @@
 # For video data + fps on input controls
 VAE_BATCH_SIZE = 64
+LATENT=False
+ASSUMED_SHAPE = (3,256,256)
 VAE_PATH = "madebyollin/taesdxl"
 OUT_H = 256
 OUT_W = 256

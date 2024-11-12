@@ -12,7 +12,7 @@ import math
 import subprocess
 import torch.nn.functional as F
 
-def yuv_2_rgb(videos):
+def yuv_2_rgb(videos, normalize = True):
     """
     Map [0,255] YUV [n,c,h,w] video tensor to [0,1] RGB tensor in half precision
     """
@@ -21,12 +21,17 @@ def yuv_2_rgb(videos):
     u = videos[...,1,:,:]
     v = videos[...,2,:,:]
 
-    res = torch.empty_like(videos)
+    res = torch.empty_like(videos) # -> RGB
     res[...,0,:,:] = y + (1.370705 * (v - 128))
     res[...,1,:,:] = y - (0.698001 * (v - 128)) - (0.337633 * (u - 128))
     res[...,2,:,:] = y + (1.732446 * (u - 128))
 
-    return (res/127.5 - 1).clamp(-1,1).half()
+    if normalize:
+        res = (res/127.5 - 1).clamp(-1,1).half()
+    else:
+        res = res.byte()
+
+    return res
 
 class TAStreamVideoReader:
     """
@@ -37,12 +42,13 @@ class TAStreamVideoReader:
     :param out_h: Resolution height of returned frames
     :param out_w: Resolution width of returned frames
     """
-    def __init__(self, frame_skip=1, chunk_size=100, out_h = 256, out_w = 256):
+    def __init__(self, frame_skip=1, chunk_size=100, out_h = 256, out_w = 256, normalize = True):
         self.frame_skip = frame_skip
         self.chunk_size = chunk_size
         self.stream_reader = None
         self.video_path = None
         self.stream_iterator = None
+        self.normalize = normalize
 
         self.out_h = out_h
         self.out_w = out_w
@@ -82,8 +88,13 @@ class TAStreamVideoReader:
 
         try:
             next_chunk = next(self.stream_iterator)[0]
-            res = yuv_2_rgb(next_chunk)
-            res = F.interpolate(res, size=(self.out_h, self.out_w), mode='bilinear', align_corners=False)
+            res = yuv_2_rgb(next_chunk, normalize=self.normalize)
+            
+            interp_fn = lambda x: F.interpolate(x, size = (self.out_h, self.out_w), mode = 'bilinear', align_corners = False)
+            if not self.normalize:
+                res = interp_fn(res.float()).byte()
+            else:
+                res = interp_fn(res)
             return res
         except StopIteration:
             return None

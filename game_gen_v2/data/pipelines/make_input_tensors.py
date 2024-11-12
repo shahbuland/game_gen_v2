@@ -8,10 +8,7 @@ import torch
 from game_gen_v2.data.controls.loading import load_inputs_tensor
 from .data_config import FPS_OUT, KEYBINDS, IN_DIR
 
-DATA_DIR = IN_DIR
-FPS = FPS_OUT
-
-def clear_embeddings(data_dir=DATA_DIR):
+def clear_controls(data_dir=IN_DIR):
     """
     Clear embeddings if we want to produce new ones
     """
@@ -60,10 +57,9 @@ class FileWalkLoader:
         input_path, output_path = self.pending_files.pop(0)
         self.processed_files.add(input_path)
         return (input_path, output_path)
-
-if __name__ == "__main__":
-    clear_embeddings()
-    loader = FileWalkLoader(DATA_DIR)
+    
+def gen_input_tensors(data_dir, fps, keybinds):
+    loader = FileWalkLoader(data_dir)
 
     while True:
         next_file = loader.get_next()
@@ -71,10 +67,9 @@ if __name__ == "__main__":
             break
 
         input_path, output_path = next_file
-        print(input_path)
-        
-        input_tensor = load_inputs_tensor(input_path, FPS, KEYBINDS)
-        torch.save(input_tensor, output_path)
-        print(f"Processed and saved: {output_path}")
 
-    print("Processing complete.")
+        input_tensor = load_inputs_tensor(input_path, fps, keybinds)
+        torch.save(input_tensor, output_path)
+
+if __name__ == "__main__":
+    gen_input_tensors(IN_DIR, FPS_OUT, KEYBINDS)

@@ -28,7 +28,7 @@ if __name__ == "__main__":
     sampler = ControlPredSampler(
         fps=data_cfg.fps,
         out_res=data_cfg.sample_size,
-        input_directory=data_cfg.data_path,
+        input_directory=data_cfg.val_path,
         image_transform=transform_video
     )
 

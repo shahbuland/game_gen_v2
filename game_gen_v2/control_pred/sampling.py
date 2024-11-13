@@ -40,6 +40,7 @@ def write_np_array_to_video(frames, fps=FPS, controls=None, output_fmt = "wandb"
     
     for i, frame in enumerate(frames):
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        frame = cv2.resize(frame, (256, 256))
 
         if controls is not None:
             frame = draw_controls(frame, controls[i])

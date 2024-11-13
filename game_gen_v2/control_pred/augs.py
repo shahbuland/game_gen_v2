@@ -42,7 +42,7 @@ def augment_video(vid):
     vid = (vid*2 - 1)
     return vid
 
-def color_jitter(vid, b_delta = 0.3, c_delta = 0.3, s_delta = 0.3):
+def color_jitter(vid, b_delta = 0.35, c_delta = 0.35, s_delta = 0.3):
     # vid is [b,n,c,h,w]
     b, n, c, h, w = vid.shape
 

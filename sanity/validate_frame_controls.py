@@ -2,21 +2,25 @@
 Validates controls and frames match up properly
 """
 
-from game_gen_v2.nn.vae import VAE
+from game_gen_v2.common.nn.vae import VAE
 
 import torch
+import torch.nn.functional as F
 import os
 from pathlib import Path
 from tinygrad.helpers import Timing
 import numpy as np
 
+from game_gen_v2.data.pipelines.data_config import FPS_OUT, KEYBINDS, OUT_DIR
+
+FPS = FPS_OUT
+
 FPS = 15
-KEYBINDS = ["SPACE", "W", "A", "S", "D", "R", "E", "G", "F", "Q", "CONTROL", "SHIFT"]
-DATA_DIR = "game_gen_v2/data/train_data"
+DATA_DIR = "E:/datasets/train_data_raw"
 
 import cv2
 
-def write_np_array_to_video(frames, output_path, fps=15, controls = None):
+def write_np_array_to_video(frames, output_path, fps=FPS, controls = None):
     """
     Write a numpy array of frames to a video file.
 
@@ -31,6 +35,8 @@ def write_np_array_to_video(frames, output_path, fps=15, controls = None):
         raise ValueError("Input frames must have shape [n_frames, height, width, channels]")
     
     n_frames, height, width, channels = frames.shape
+
+
     
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
@@ -83,6 +89,9 @@ def draw_controls(frame, control_vector):
 
 def torch_to_np(x):
     # x is [b,c,h,w]
+    if x.dtype == torch.uint8:
+        return x.permute(0, 2, 3, 1).cpu().numpy()
+
     x = torch.clamp(x, -1, 1)
     x = (x + 1) * 127.5
     x = x.to(torch.uint8)
@@ -91,19 +100,24 @@ def torch_to_np(x):
 if __name__ == "__main__":
     # Get the first pair of vt and it files
     data_path = Path(DATA_DIR)
-    vt_files = sorted(data_path.glob("*_vt.pt"), key=lambda x: int(x.stem.split('_')[0]))
-    it_files = sorted(data_path.glob("*_it.pt"), key=lambda x: int(x.stem.split('_')[0]))
+    vt_files = sorted(data_path.glob("*_video.pt"), key=lambda x: int(x.stem.split('_')[0]))
+    it_files = sorted(data_path.glob("*_controls.pt"), key=lambda x: int(x.stem.split('_')[0]))
 
-    first_vt_file = vt_files[78]
-    first_it_file = it_files[78]
+    first_vt_file = vt_files[1]
+    first_it_file = it_files[1]
 
     with Timing("Time to load: "):
         video_tensor = torch.load(first_vt_file)
         input_tensor = torch.load(first_it_file)
 
-    vae = VAE()
-    original_frames = vae.decode(video_tensor)
+    if video_tensor.shape[-3] > 3:
+        vae = VAE()
+        original_frames = vae.decode(video_tensor)
+    else:
+        original_frames = video_tensor
+        original_frames = F.interpolate(original_frames.float(), (256, 256)).byte()
     original_frames = torch_to_np(original_frames)
+    
 
     write_np_array_to_video(original_frames, "sanity/test.mp4", controls=input_tensor)
 

@@ -93,6 +93,17 @@ class TrainConfig(ConfigClass):
     wandb_project : str = "control_pred"
 
 @dataclass
+class FrameDataConfig(ConfigClass):
+    data_path: str = ""
+    val_path: str = ""
+    sample_size : int = 256
+    temporal_sample_size :int = 8
+    channels : int = 3
+    diversity : bool = True
+    top_p : float = 0.5
+    fps: int = 15
+
+@dataclass
 class SamplerConfig(ConfigClass):
     n_steps : int = 128
     cfg_scale : float = 3.5

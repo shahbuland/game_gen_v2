@@ -1,6 +1,7 @@
 sample_size: 256
 channels: 3
-top_p: 0.9
+top_p: 1.0
+diversity: false
 fps: 15
 data_path: "E:/datasets/train_data_raw"
-val_path: "E:/datasets/test_data"
+val_path: "E:/datasets/train_data_raw/000"

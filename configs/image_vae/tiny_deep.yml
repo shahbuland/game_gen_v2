@@ -1,5 +1,6 @@
 # Transformer configuration for video processing
-n_layers: 12
+n_layers: 2
+n_sublayers: 6
 n_heads: 6
 d_model: 384
 attn_impl: "linear"
@@ -7,5 +8,6 @@ cross: false
 
 # Input image configuration
 channels: 3
-sample_size: 512
-patch_size: 16
+sample_size: 224
+patch_size: 14
+latent_channels: 128

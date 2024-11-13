@@ -8,7 +8,7 @@ epochs: 100
 # Saving and intervals
 checkpoint_root_dir: "checkpoints/control_pred/"
 log_interval: 1
-sample_interval: 1
+sample_interval: 50
 save_interval: 1000
 val_interval: 1000
 resume: false
@@ -26,6 +26,6 @@ scheduler_kwargs:
   warmup_steps: 150
 
 # Logging
-run_name: "tiny_top50_all_ctrls_bigger RGB"
+run_name: "image vae"
 wandb_entity: "shahbuland"
 wandb_project: "control_pred"

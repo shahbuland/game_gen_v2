@@ -20,7 +20,7 @@ def count_parameters(model):
     Args:
         model (nn.Module): The PyTorch model to analyze.
     """
-    total_params = sum(p.numel() for p in model.core.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total_params
 
 def pretty_print_parameters(model):

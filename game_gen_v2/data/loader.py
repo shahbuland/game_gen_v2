@@ -6,12 +6,17 @@ import random
 from pathlib import Path
 
 class FrameDataset(IterableDataset):
-    def __init__(self, data_dir, frame_count=100, diversity = True, top_p : float = 0.5, image_transform = None):
+    def __init__(
+            self, data_dir,
+            frame_count=100, diversity = True, top_p : float = 0.5,
+            image_transform = None, ignore_controls = False
+        ):
         self.data_dir = Path(data_dir)
         self.frame_count = frame_count
         self.diversity = diversity
         self.top_p = top_p
         self.image_transform = image_transform
+        self.ignore_controls = ignore_controls
         
         # Find all subdirectories
         self.subdirs = [d for d in self.data_dir.iterdir() if d.is_dir()]
@@ -77,7 +82,10 @@ class FrameDataset(IterableDataset):
             if seq_len < self.frame_count:
                 continue
                 
-            div_idx = self.sample_weighted(int(seq_len * self.top_p))
+            if not self.diversity:
+                div_idx = random.randint(0, seq_len - self.frame_count)
+            else:
+                div_idx = self.sample_weighted(int(seq_len * self.top_p))
             
             subdir = self.get_subdir_for_id(data_id)
             vt_path = subdir / f"{data_id}_video.pt"
@@ -170,6 +178,12 @@ class FrameDataset(IterableDataset):
 
             if self.image_transform is not None:
                 res_vid = self.image_transform(res_vid)
+
+            if self.frame_count == 1 and len(res_vid.shape) == 5:
+                res_vid = res_vid.squeeze(1)  # Remove the frames dimension when only 1 frame
+
+            if self.ignore_controls:
+                return res_vid
 
             res_ctrl = torch.stack(res_ctrl)
             res_ctrl = self.normalize_controls(res_ctrl)

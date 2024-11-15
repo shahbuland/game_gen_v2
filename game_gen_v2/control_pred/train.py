@@ -2,7 +2,7 @@ import torch
 
 from game_gen_v2.common.trainers.supervised_trainer import SimpleSupervisedTrainer
 from game_gen_v2.common.configs import TrainConfig
-from game_gen_v2.data.loader import FrameDataset
+from game_gen_v2.data.loader import FrameDataset, create_loader
 
 from .nn import ControlPredModel
 from .configs import ControlPredConfig, ControlPredDataConfig
@@ -16,15 +16,24 @@ if __name__ == "__main__":
 
     model = ControlPredModel(model_cfg)
     trainer = SimpleSupervisedTrainer(train_cfg, model_cfg)
-    ds = FrameDataset(
-        data_cfg.data_path,
-        frame_count=model_cfg.temporal_sample_size,
-        top_p = data_cfg.top_p,
-        image_transform = augtform_video
-    )
 
-    loader = ds.create_loader(train_cfg.batch_size, num_workers = 0)
-    sampler = None
+    dataset_kwargs = {
+        'data_dir': data_cfg.data_path,
+        'frame_count': model_cfg.temporal_sample_size,
+        'diversity': data_cfg.diversity,
+        'top_p': data_cfg.top_p,
+        'image_transform': augtform_video
+    }
+
+    dataloader_kwargs = {
+        'batch_size': train_cfg.batch_size,
+        'num_workers': 4,
+        'pin_memory': True,
+        'prefetch_factor': 2
+    }
+
+    loader = create_loader(dataset_kwargs, dataloader_kwargs)
+    
     sampler = ControlPredSampler(
         fps=data_cfg.fps,
         out_res=data_cfg.sample_size,

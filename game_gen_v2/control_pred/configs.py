@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List
-from game_gen_v2.common.configs import TransformerConfig, ConfigClass, FrameDataConfig
+from game_gen_v2.common.configs import TransformerConfig, ResNetConfig, ConfigClass, FrameDataConfig
 
 @dataclass
 class ControlPredConfig(TransformerConfig):
@@ -31,3 +31,14 @@ class ControlPredConfig(TransformerConfig):
     mouse_zero_weights : float = 0.3183
 
 ControlPredDataConfig = FrameDataConfig
+
+@dataclass 
+class ControlPredResConfig(ResNetConfig):
+    n_controls : int = 8 
+    n_mouse_axes : int = 2
+
+    # For the transformer
+    attn_n_layers : int = 2
+    attn_n_heads : int = 6
+    attn_d_model : int = 384
+    attn_impl : str = "flash"

@@ -44,6 +44,29 @@ class TransformerConfig(ConfigClass):
         return self.n_image_tokens * (self.temporal_sample_size // self.temporal_patch_size)
     
 @dataclass
+class ResNetConfig(ConfigClass):
+    channel_counts : List[int] = field(default_factory=lambda :[
+        64,
+        128,
+        256,
+        512,
+        512
+    ])
+    res_blocks : List[int] = field(default_factory=lambda :[
+        2,
+        2,
+        2,
+        2
+    ])
+    channels_in : int = 3
+    sample_size : int = 224
+    temporal_sample_size : int = 16
+
+    @property
+    def n_layers(self) -> int:
+        return len(self.channel_counts) - 1
+    
+@dataclass
 class TrainConfig(ConfigClass):
     # Generic train terms
     dataset_id : str = "coco"

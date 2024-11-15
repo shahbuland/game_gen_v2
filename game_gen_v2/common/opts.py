@@ -101,3 +101,6 @@ def get_extra_optimizer(name):
     if name.lower() == "heavyball2":
         from heavyball import SFPaLMForeachSOAP
         return SFPaLMForeachSOAP
+    if name.lower() == "lion":
+        from lion_pytorch import Lion
+        return Lion

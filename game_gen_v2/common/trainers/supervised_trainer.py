@@ -5,11 +5,18 @@ from .base import BaseTrainer
 from ..utils import Stopwatch
 
 class SimpleSupervisedTrainer(BaseTrainer):
-    def train(self, model, train_loader, val_loader = None, sampler = None):
+    def train(self, model, train_loader, val_loader = None, sampler = None, compile = False):
         model, train_loader, val_loader, opt, scheduler, _ = self.train_preamble(model, train_loader, val_loader)
 
         sw = Stopwatch()
         sw.reset()
+
+        if compile:
+            model = torch.compile(
+                model,
+                mode="max-autotune",
+                fullgraph=True
+            )
 
         for epoch in range(self.config.epochs):
             for i, (inputs, labels) in enumerate(train_loader):

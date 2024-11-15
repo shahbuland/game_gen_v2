@@ -128,75 +128,89 @@ class FrameDataset(IterableDataset):
         index = int(min(max(math.floor(x * max_n), 0), max_n-1))
         
         return index
-    
-    def create_loader(self, batch_size, num_workers=4):
-        def collate_fn(batch):
-            """
-            Smart loading to make sure we don't load same file twice
-            """
-            # Control files are assumed to be small enough that it doesn't matter
-            vt_paths = [x['vt_path'] for x in batch]
-            it_paths = [x['it_path'] for x in batch]
-            div_inds = [x['div_idx'] for x in batch]
-            # start_inds = [x['start_idx'] for x in batch]
-            #end_inds = [x['end_idx'] for x in batch]
 
-            res_vid = []
-            res_ctrl = []
-
-            # Each file, which idx's is it serving?
-            file_map = {}
-            for i, path in enumerate(vt_paths):
-                if path in file_map:
-                    file_map[path].append(i)
-                else:
-                    file_map[path] = [i]
-
-            for path in file_map:
-                vid = torch.load(path, weights_only = False)
-                ctrl = torch.load(str(path).replace("_video.pt", "_controls.pt"), weights_only = False)
-                div = torch.load(str(path).replace("_video.pt", "_diversity_inds.pt"), weights_only = False)
-
-                vid_len = len(vid)
-
-                for i in file_map[path]:
-                    idx_into_vid = div[div_inds[i]] # Index of some diverse frame in video
-                    if idx_into_vid >= self.frame_count:
-                        slice_end = idx_into_vid
-                        slice_start = idx_into_vid - self.frame_count
-                    else:
-                        slice_start = idx_into_vid
-                        slice_end = idx_into_vid + self.frame_count
-
-                    #slice_start = start_inds[i]
-                    #slice_end = end_inds[i]
-
-                    res_vid.append(vid[slice_start:slice_end])
-                    res_ctrl.append(ctrl[slice_start:slice_end])
-        
-            res_vid = torch.stack(res_vid)
-
-            if self.image_transform is not None:
-                res_vid = self.image_transform(res_vid)
-
-            if self.frame_count == 1 and len(res_vid.shape) == 5:
-                res_vid = res_vid.squeeze(1)  # Remove the frames dimension when only 1 frame
-
-            if self.ignore_controls:
-                return res_vid
-
-            res_ctrl = torch.stack(res_ctrl)
-            res_ctrl = self.normalize_controls(res_ctrl)
-
-            return res_vid, res_ctrl
-
+    @classmethod
+    def create_loader(cls, batch_size, **dataloader_kwargs):
         return torch.utils.data.DataLoader(
-            self,
+            cls,
             batch_size=batch_size,
-            num_workers=num_workers,
-            collate_fn=collate_fn
+            collate_fn=cls.get_collate_fn(),
+            **dataloader_kwargs
         )
 
+from functools import partial
+def collate_fn(batch, image_transform, frame_count, ignore_controls, normalize_controls):
+    """
+    Smart loading to make sure we don't load same file twice
+    """
+    # Control files are assumed to be small enough that it doesn't matter
+    vt_paths = [x['vt_path'] for x in batch]
+    it_paths = [x['it_path'] for x in batch]
+    div_inds = [x['div_idx'] for x in batch]
+    # start_inds = [x['start_idx'] for x in batch]
+    #end_inds = [x['end_idx'] for x in batch]
+
+    res_vid = []
+    res_ctrl = []
+
+    # Each file, which idx's is it serving?
+    file_map = {}
+    for i, path in enumerate(vt_paths):
+        if path in file_map:
+            file_map[path].append(i)
+        else:
+            file_map[path] = [i]
+
+    for path in file_map:
+        vid = torch.load(path, weights_only = False, map_location = 'cpu')
+        ctrl = torch.load(str(path).replace("_video.pt", "_controls.pt"), weights_only = False, map_location = 'cpu')
+        div = torch.load(str(path).replace("_video.pt", "_diversity_inds.pt"), weights_only = False, map_location = 'cpu')
+
+        vid_len = len(vid)
+
+        for i in file_map[path]:
+            idx_into_vid = div[div_inds[i]] # Index of some diverse frame in video
+            if idx_into_vid >= frame_count:
+                slice_end = idx_into_vid
+                slice_start = idx_into_vid - frame_count
+            else:
+                slice_start = idx_into_vid
+                slice_end = idx_into_vid + frame_count
+
+            #slice_start = start_inds[i]
+            #slice_end = end_inds[i]
+
+            res_vid.append(vid[slice_start:slice_end])
+            res_ctrl.append(ctrl[slice_start:slice_end])
+
+    res_vid = torch.stack(res_vid)
+
+    if image_transform is not None:
+        res_vid = image_transform(res_vid)
+
+    if frame_count == 1 and len(res_vid.shape) == 5:
+        res_vid = res_vid.squeeze(1)  # Remove the frames dimension when only 1 frame
+
+    if ignore_controls:
+        return res_vid
+
+    res_ctrl = torch.stack(res_ctrl)
+    res_ctrl = normalize_controls(res_ctrl)
+
+    return res_vid, res_ctrl
+    
+def create_loader(dataset_kwargs, dataloader_kwargs):
+    ds = FrameDataset(**dataset_kwargs)
+    collate = partial(collate_fn, 
+                     image_transform=ds.image_transform, 
+                     frame_count=ds.frame_count,
+                     ignore_controls=ds.ignore_controls,
+                     normalize_controls=ds.normalize_controls)
+    return DataLoader(
+        ds,
+        collate_fn = collate,
+        **dataloader_kwargs
+    )
 
 if __name__ == "__main__":
     from tinygrad.helpers import Timing

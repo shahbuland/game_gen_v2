@@ -2,5 +2,5 @@ sample_size: 256
 channels: 3
 top_p: 0.9
 fps: 15
-data_path: "E:/datasets/train_data_raw"
-val_path: "E:/datasets/test_data"
+data_path: "/media/shahbuland/New Volume/datasets/train_data_raw"
+val_path: "/media/shahbuland/New Volume/datasets/test_data/000"

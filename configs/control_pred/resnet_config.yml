@@ -1,0 +1,24 @@
+# ResNet configuration for video processing
+channel_counts:
+  - 32
+  - 64
+  - 128
+  - 256
+
+res_blocks:
+  - 1
+  - 1
+  - 1
+
+channels_in: 3
+sample_size: 224
+temporal_sample_size: 16
+
+# Control prediction specific parameters
+n_controls: 14
+n_mouse_axes: 2
+
+attn_n_layers: 2
+attn_n_heads: 6
+attn_d_model: 384
+attn_impl: "flash"

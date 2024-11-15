@@ -1,0 +1,31 @@
+# Generic train terms
+target_batch_size: 128
+batch_size: 128
+val_batch_mult: 2
+grad_clip: -1
+epochs: 100
+
+# Saving and intervals
+checkpoint_root_dir: "checkpoints/control_pred/"
+log_interval: 1
+sample_interval: 200
+save_interval: 1000
+val_interval: 1000
+resume: false
+
+# optimizer and scheduler
+opt: "AdamW"
+opt_kwargs:
+  lr: 2.0e-4
+  eps: 1.0e-15
+  betas: [0.9, 0.95]
+  weight_decay: 0.01
+
+scheduler: null
+scheduler_kwargs:
+  warmup_steps: 150
+
+# Logging
+run_name: "3d_resnet"
+wandb_entity: "shahbuland"
+wandb_project: "control_pred"

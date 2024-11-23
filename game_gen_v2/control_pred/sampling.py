@@ -11,11 +11,11 @@ from pathlib import Path
 from tqdm import tqdm
 import wandb
 
-from game_gen_v2.data.pipelines.data_config import FPS_OUT, KEYBINDS
+from game_gen_v2.data.pipelines.data_config import FPS_OUT
 
 FPS = FPS_OUT
 
-def write_np_array_to_video(frames, fps=FPS, controls=None, output_fmt = "wandb"):
+def write_np_array_to_video(frames, fps=FPS, controls=None, output_fmt = "wandb", keybinds=None):
     """
     Convert a numpy array of frames to a wandb.Video object.
 
@@ -43,7 +43,7 @@ def write_np_array_to_video(frames, fps=FPS, controls=None, output_fmt = "wandb"
         frame = cv2.resize(frame, (256, 256))
 
         if controls is not None:
-            frame = draw_controls(frame, controls[i])
+            frame = draw_controls(frame, controls[i], keybinds)
 
         if output_fmt != "cv":
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -65,8 +65,9 @@ def write_np_array_to_video(frames, fps=FPS, controls=None, output_fmt = "wandb"
 
     return video
 
-def draw_controls(frame, control_vector):
-    key_labels = KEYBINDS + ["LMB", "RMB"]
+def draw_controls(frame, control_vector, keybinds):
+
+    key_labels = keybinds + ["LMB", "RMB"]
     key_pressed = [bool(value) for value in control_vector[:-2]]
     mouse_x_axis = float(control_vector[-2]) 
     mouse_y_axis = float(control_vector[-1])
@@ -82,7 +83,7 @@ def draw_controls(frame, control_vector):
 
     # Draw key boxes
     box_size = 12
-    box_gap = 5
+    box_gap = 20
     start_x = 10
     start_y = 226  # 256 - 30 (bottom margin)
 
@@ -215,7 +216,79 @@ class ControlPredSampler:
             res.append(write_np_array_to_video(torch_to_np(sample), controls=control, fps=self.fps))
 
         return res
+    
+class ControlPredMiddleSampler(ControlPredSampler):
+    def __init__(self, fps=60, out_res=128, input_directory=None, image_transform=None, keybinds=None):
+        super().__init__(fps, out_res, input_directory, image_transform=image_transform)
 
+        self.keybinds = keybinds
+
+    @torch.no_grad()
+    def predict_on_samples(self, model, model_cfg):
+        """
+        Predicts controls for each frame using a sliding window approach.
+        For each window of temporal_sample_size frames, predicts controls for the middle frame.
+        """
+        t = model_cfg.temporal_sample_size
+        n_controls = model_cfg.n_controls
+        mid_idx = t // 2
+
+        # Get model dtype and device from model parameters
+        model_dtype = next(model.parameters()).dtype
+        model_device = next(model.parameters()).device
+
+        samples = self.input_samples # [b,n,c,h,w] n >> t
+        # Model takes [b,t,c,h,w] as input
+
+        # We'll return all frames but can only predict for frames after mid_idx
+        return_samples = samples.clone()
+        return_controls = []
+
+        # Initialize empty predictions for first mid_idx frames
+        empty_preds = torch.zeros((samples.shape[0], mid_idx, n_controls+2), 
+                                device=model_device, dtype=model_dtype)
+        return_controls.append(empty_preds)
+
+        # Predict for middle frames using sliding window
+        for i in tqdm(range(t, samples.shape[1] - mid_idx + 1)):
+            model_in = samples[:,i-t:i] # [b,t,c,h,w]
+            model_in = model_in.to(device=model_device, dtype=model_dtype)
+            model_out_btn, model_out_mouse = model(model_in) # [b,d] # model out for middle
+            
+            # Denormalize the inputs back to something useful
+            model_out_btn = (torch.sigmoid(model_out_btn) > 0.5).float()
+            model_out = torch.cat([model_out_btn, model_out_mouse], -1) # [b,d]
+            
+            return_controls.append(model_out.unsqueeze(1))
+
+        # Stack all predictions
+        return_controls = torch.cat(return_controls, dim=1) # [b,n_frames,n_controls]
+        # Add empty predictions for last few frames to match length
+        n_remaining = return_samples.shape[1] - return_controls.shape[1]
+        if n_remaining > 0:
+            empty_preds = torch.zeros((samples.shape[0], n_remaining, n_controls+2), 
+                                    device=model_device, dtype=model_dtype)
+            return_controls = torch.cat([return_controls, empty_preds], dim=1)
+
+        return return_samples, return_controls
+
+    @torch.no_grad()
+    def __call__(self, model: ControlPredModel):
+        """
+        Given model, uses model to predict controls for internal samples.
+        Returns frames with model predictions in same format as sanity stuff
+        """
+        model = model.core
+        config = model.config
+        n_controls = config.n_controls
+
+        samples, controls = self.predict_on_samples(model, config)
+
+        res = []
+        for i, (sample, control) in enumerate(zip(samples, controls)):
+            res.append(write_np_array_to_video(torch_to_np(sample), controls=control, fps=self.fps, keybinds=self.keybinds))
+
+        return res
 
 if __name__ == "__main__":
     import torch

@@ -42,3 +42,18 @@ class ControlPredResConfig(ResNetConfig):
     attn_n_heads : int = 6
     attn_d_model : int = 384
     attn_impl : str = "flash"
+
+@dataclass
+class ControlPredictorConfig(ConfigClass):
+    channels_in : int = 3
+    sample_size : int = 128
+    temporal_sample_size : int = 16
+
+    n_controls : int = 8 
+    n_mouse_axes : int = 2
+
+    # For the transformer
+    attn_n_layers : int = 2
+    attn_n_heads : int = 6
+    attn_d_model : int = 384
+    attn_impl : str = "flash"    

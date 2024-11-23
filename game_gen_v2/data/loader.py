@@ -8,13 +8,11 @@ from pathlib import Path
 class FrameDataset(IterableDataset):
     def __init__(
             self, data_dir,
-            frame_count=100, diversity = True, top_p : float = 0.5,
+            frame_count=100,
             image_transform = None, ignore_controls = False
         ):
         self.data_dir = Path(data_dir)
         self.frame_count = frame_count
-        self.diversity = diversity
-        self.top_p = top_p
         self.image_transform = image_transform
         self.ignore_controls = ignore_controls
         
@@ -58,16 +56,16 @@ class FrameDataset(IterableDataset):
                 meta = json.load(f)
                 self.vid_lens[id] = meta["vid_len"]
         
-        # Create a mapping of cumulative frame counts up to each data_id
         self.frames_upto = {}
         cumulative_frames = 0
         for id in self.data_ids:
-            self.frames_upto[id] = cumulative_frames
+            self.frames_upto[id] = cumulative_frames 
             cumulative_frames += self.vid_lens[id]
 
         self.total_samples = 0
         for id in self.vid_lens:
-            self.total_samples += (self.vid_lens[id] - self.frame_count + 1)
+            if id in self.data_ids:  # Only count frames for non-filtered IDs
+                self.total_samples += (self.vid_lens[id] - self.frame_count + 1)
 
     def get_subdir_for_id(self, id):
         """Helper method to get the subdirectory for a given id"""
@@ -82,10 +80,8 @@ class FrameDataset(IterableDataset):
             if seq_len < self.frame_count:
                 continue
                 
-            if not self.diversity:
-                div_idx = random.randint(0, seq_len - self.frame_count)
-            else:
-                div_idx = self.sample_weighted(int(seq_len * self.top_p))
+            # Randomly sample a starting index that allows for frame_count frames
+            start_idx = random.randint(0, seq_len - self.frame_count)
             
             subdir = self.get_subdir_for_id(data_id)
             vt_path = subdir / f"{data_id}_video.pt"
@@ -94,7 +90,7 @@ class FrameDataset(IterableDataset):
             yield {
                 'vt_path': vt_path,
                 'it_path': it_path,
-                'div_idx' : div_idx
+                'div_idx' : start_idx
             }
 
     def normalize_controls(self, x):
@@ -147,8 +143,6 @@ def collate_fn(batch, image_transform, frame_count, ignore_controls, normalize_c
     vt_paths = [x['vt_path'] for x in batch]
     it_paths = [x['it_path'] for x in batch]
     div_inds = [x['div_idx'] for x in batch]
-    # start_inds = [x['start_idx'] for x in batch]
-    #end_inds = [x['end_idx'] for x in batch]
 
     res_vid = []
     res_ctrl = []
@@ -164,21 +158,17 @@ def collate_fn(batch, image_transform, frame_count, ignore_controls, normalize_c
     for path in file_map:
         vid = torch.load(path, weights_only = False, map_location = 'cpu')
         ctrl = torch.load(str(path).replace("_video.pt", "_controls.pt"), weights_only = False, map_location = 'cpu')
-        div = torch.load(str(path).replace("_video.pt", "_diversity_inds.pt"), weights_only = False, map_location = 'cpu')
 
         vid_len = len(vid)
 
         for i in file_map[path]:
-            idx_into_vid = div[div_inds[i]] # Index of some diverse frame in video
+            idx_into_vid = div_inds[i] # Index into video
             if idx_into_vid >= frame_count:
                 slice_end = idx_into_vid
                 slice_start = idx_into_vid - frame_count
             else:
                 slice_start = idx_into_vid
                 slice_end = idx_into_vid + frame_count
-
-            #slice_start = start_inds[i]
-            #slice_end = end_inds[i]
 
             res_vid.append(vid[slice_start:slice_end])
             res_ctrl.append(ctrl[slice_start:slice_end])

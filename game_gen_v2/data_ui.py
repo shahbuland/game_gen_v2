@@ -26,16 +26,16 @@ class DataProcessingUI:
         config = {
             "VAE_BATCH_SIZE": 64,
             "LATENT": False,
-            "ASSUMED_SHAPE": (3, 224, 224),
+            "ASSUMED_SHAPE": (3, 128, 128),
             "VAE_PATH": "madebyollin/taesdxl",
-            "OUT_H": 256,
-            "OUT_W": 256,
+            "OUT_H": 128,
+            "OUT_W": 128,
             "FPS_IN": 60,
-            "FPS_OUT": 15,
-            "SEGMENT_LENGTH": 1000,
-            "KEYBINDS": ["SPACE", "W", "A", "S", "D", "R", "E", "G", "F", "Q", "LCTRL", "LSHIFT"],
-            "IN_DIR": "D:/datasets/BlackOpsColdWar",
-            "OUT_DIR": "E:/datasets/train_data"
+            "FPS_OUT": 60,
+            "SEGMENT_LENGTH": 500,
+            "KEYBINDS": ["SPACE", "W", "A", "S", "D","LSHIFT"],
+            "IN_DIR": "E:/data_dump/games",
+            "OUT_DIR": "E:/datasets/128_60fps_wasd_many"
         }
         return config
 

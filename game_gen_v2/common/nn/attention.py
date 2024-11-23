@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 try:
     from flash_attn import flash_attn_func
@@ -24,6 +25,19 @@ def head_split(x, n_heads):
 def head_merge(x):
     return eo.rearrange(x, 'b n h d -> b n (h d)')
 
+def default_attn_func(q, k, v):
+    # q,k,v are all b n h d
+    def swap_n_h(x):
+        return x.transpose(-3,-2)
+    
+    q = swap_n_h(q)
+    k = swap_n_h(k)
+    v = swap_n_h(v)
+
+    out = F.scaled_dot_product_attention(q,k,v)
+
+    return swap_n_h(out)
+
 class Attn(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -46,7 +60,11 @@ class Attn(nn.Module):
             self.cross_k_norm = RMSNorm(dim_head)
 
         self.rope = RoPEEmbedding(dim_head)
-        self.attn_func = flash_attn_func
+
+        try:
+            self.attn_func = flash_attn_func
+        except:
+            self.attn_func = default_attn_func
 
     def forward(self, x, y=None):
         _,n,_ = x.shape

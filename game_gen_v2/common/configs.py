@@ -125,6 +125,9 @@ class FrameDataConfig(ConfigClass):
     diversity : bool = True
     top_p : float = 0.5
     fps: int = 15
+    keybinds : List = field(default_factory=lambda: [
+        "SPACE", "W", "A", "S", "D", "LSHIFT"
+    ])
 
 @dataclass
 class SamplerConfig(ConfigClass):
